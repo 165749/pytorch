@@ -409,6 +409,7 @@ void pushProfilingCallbacksLegacy() {
             state_ptr->popRange(fn, record_cuda);
           })
           .needsInputs(registration_state_ptr->config().report_input_shapes)
+          .needsOutputs(registration_state_ptr->config().report_input_shapes)
           .needsIds(true));
   registration_state_ptr->setCallbackHandle(handle);
 }

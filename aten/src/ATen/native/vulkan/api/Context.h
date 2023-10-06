@@ -1,5 +1,9 @@
 #pragma once
 
+#ifndef USE_VULKAN_GPU_DIAGNOSTICS
+#define USE_VULKAN_GPU_DIAGNOSTICS
+#endif
+
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Adapter.h>
@@ -58,7 +62,7 @@ class Context final {
   FencePool fences_;
   // Diagnostics
   // TODO: remove USE_VULKAN_GPU_DIAGNOSTICS
-  bool enable_op_profiling_{false};
+  bool enable_op_profiling_{true};
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
@@ -373,7 +377,7 @@ inline void Context::submit_copy(
 #ifdef USE_VULKAN_GPU_DIAGNOSTICS
   uint32_t log_idx = UINT32_MAX;
   if (enable_op_profiling_) {
-    std::string label = "cmd_copy";
+    std::string label = "vulkan.cmd_copy";
     log_idx = querypool_.shader_profile_begin(
         cmd_, label, create_extent3d({0, 0, 0}), create_extent3d({0, 0, 0}));
   }

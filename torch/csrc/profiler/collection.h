@@ -127,6 +127,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       uint64_t correlation_id,
       time_t end_time_ns,
       std::vector<op_input_t>&& inputs,
+      std::vector<op_input_t>&& outputs,
       jit_stack_t&& jit_stack,
       jit_modules_t&& jit_modules,
       extra_args_t&& extra_args,
@@ -137,6 +138,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
         correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
+        outputs_{std::move(outputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
@@ -146,6 +148,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   uint64_t correlation_id_;
   time_t end_time_ns_;
   std::vector<op_input_t> inputs_;
+  std::vector<op_input_t> outputs_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
   extra_args_t extra_args_;
@@ -437,6 +440,7 @@ constexpr int IO_ENCODER_DEFAULT_BLOCK_SIZE = 1024;
 class InputOutputEncoder final {
  public:
   void push(c10::ArrayRef<const c10::IValue> values);
+  void push(const std::vector<c10::IValue> values);
 
   // Used during post-processing to create vectors for shapes and dtype.
   auto getNextShapesAndDtypes();
@@ -469,6 +473,7 @@ class TORCH_API ThreadLocalSubqueue {
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
 
   std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn);
+  void end_op(const at::RecordFunction& fn);
 
   template <class... Args>
   void emplace_backend_event(Args&&... args) {
@@ -544,7 +549,8 @@ class TORCH_API ThreadLocalSubqueue {
     } op_events_;
 
     // report_input_shapes
-    InputOutputEncoder inputs_outputs_;
+    InputOutputEncoder inputs_;
+    InputOutputEncoder outputs_;
 
     // with_stack (JIT)
     AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;

@@ -18,15 +18,25 @@
 #include <vector>
 
 #include <ATen/ATen.h>
+#include <ATen/vulkan/Context.h>
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/string_utils.h"
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/profiler_edge.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/script.h>
+#include <torch/csrc/profiler/events.h>
 
 #include <c10/mobile/CPUCachingAllocator.h>
+
+#if defined(__ANDROID__)
+#ifndef USE_PTHREADPOOL
+#define USE_PTHREADPOOL
+#endif /* USE_PTHREADPOOL */
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#endif
 
 #include <chrono>
 using namespace std::chrono;
@@ -71,6 +81,10 @@ C10_DEFINE_bool(
 
 C10_DEFINE_int(pytext_len, 0, "Length of input sequence.");
 C10_DEFINE_bool(vulkan, false, "Whether to use Vulkan backend (GPU).");
+C10_DEFINE_string(trace_path, "", "Path to store running trace.");
+C10_DEFINE_int(num_threads, 0, "The number of threads.");
+C10_DEFINE_int(max_time, 0, "The maximum seconds of benchmark (terminate the program after 5 runs if exceed the max_time).");
+C10_DEFINE_bool(full_profile, false, "Whether to profile full information.");
 
 namespace {
 
@@ -248,6 +262,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  if (FLAGS_num_threads > 0) {
+    caffe2::pthreadpool()->set_thread_count(FLAGS_num_threads);
+  }
+
   std::vector<c10::IValue> inputs = create_inputs();
 
   c10::InferenceMode mode;
@@ -317,23 +335,88 @@ int main(int argc, char** argv) {
       ".");
   caffe2::Timer timer;
   std::vector<float> times;
-  auto micros = timer.MicroSeconds();
-  for (int i = 0; i < FLAGS_iter; ++i) {
-    auto start = high_resolution_clock::now();
-    runner->run(module, inputs);
-    auto stop = high_resolution_clock::now();
-    auto duration = duration_cast<microseconds>(stop - start);
-    times.push_back(duration.count());
+  float run_time = 0;
+  if (FLAGS_trace_path.empty()) {
+    // End-to-end latency
+    for (int i = 0; i < FLAGS_iter; ++i) {
+      auto start = high_resolution_clock::now();
+      runner->run(module, inputs);
+      auto stop = high_resolution_clock::now();
+      auto duration = duration_cast<microseconds>(stop - start);
+      times.push_back(duration.count());
+      run_time += duration.count();
+      if (FLAGS_max_time > 0 && run_time / 1e6 > FLAGS_max_time && i >= 4) {
+        break;
+      }
+    }
+  } else {
+    // Profiling operations
+    std::string trace_file_name(FLAGS_trace_path);
+    if (FLAGS_vulkan) {
+      // GPU
+      auto p = at::vulkan::g_vulkan_impl_registry.load();
+      p->enable_op_profiling();
+      p->reset_querypool();
+      torch::jit::mobile::KinetoEdgeCPUProfiler profiler(
+          module,
+          trace_file_name,
+          FLAGS_full_profile, // record input_shapes
+          FLAGS_full_profile, // profile memory
+          true, // record callstack
+          FLAGS_full_profile, // record flops
+          FLAGS_full_profile, // record module hierarchy
+          {}, // performance events
+          false); // adjust_vulkan_timestamps
+      // Main run of profiling
+      for (int i = 0; i < FLAGS_iter; ++i) {
+        auto start = high_resolution_clock::now();
+        runner->run(module, inputs);
+        auto stop = high_resolution_clock::now();
+        auto duration = duration_cast<microseconds>(stop - start);
+        times.push_back(duration.count());
+        run_time += duration.count();
+        if (FLAGS_max_time > 0 && run_time / 1e6 > FLAGS_max_time && i >= 4) {
+          break;
+        }
+      }
+      p->disable_op_profiling();
+    } else {
+      // CPU
+      torch::jit::mobile::KinetoEdgeCPUProfiler profiler(
+          module,
+          trace_file_name,
+          FLAGS_full_profile, // record input_shapes
+          FLAGS_full_profile, // profile memory
+          false, // record callstack
+          FLAGS_full_profile, // record flops
+          FLAGS_full_profile, // record module hierarchy
+          {}, // performance events
+          false); // adjust_vulkan_timestamps
+      // Main run of profiling
+      for (int i = 0; i < FLAGS_iter; ++i) {
+        auto start = high_resolution_clock::now();
+        runner->run(module, inputs);
+        auto stop = high_resolution_clock::now();
+        auto duration = duration_cast<microseconds>(stop - start);
+        times.push_back(duration.count());
+        run_time += duration.count();
+        if (FLAGS_max_time > 0 && run_time / 1e6 > FLAGS_max_time && i >= 4) {
+          break;
+        }
+      }
+    }
   }
-  micros = timer.MicroSeconds();
-  if (FLAGS_report_pep) {
-    for (auto t : times) {
-      std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
+
+  float total_latency = 0;
+  for (auto t : times) {
+    total_latency += t;
+    if (FLAGS_report_pep) {
+        std::cout << "PyTorchObserver {\"type\": \"NET\", \"unit\": \"us\", \"metric\": \"latency\", \"value\": \"" << t << "\"}" << std::endl;
     }
   }
   std::cout << "Main run finished. Microseconds per iter: "
-            << micros / FLAGS_iter
-            << ". Iters per second: " << 1000.0 * 1000 * FLAGS_iter / micros
+            << total_latency / times.size()
+            << ". Iters per second: " << 1000.0 * 1000 * times.size() / total_latency
             << std::endl;
 
   return 0;

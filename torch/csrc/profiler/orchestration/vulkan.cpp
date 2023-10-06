@@ -19,7 +19,7 @@ void deregisterGetShaderNameAndDurationNs() {
   get_shader_name_and_duration_ns_fn = nullptr;
 }
 
-std::tuple<std::string, uint64_t> getShaderNameAndDurationNs(
+std::tuple<std::string, uint64_t, uint64_t> getShaderNameAndDurationNs(
     const vulkan_id_t& vulkan_id) {
   /*
     We don't need to worry about a race condition with

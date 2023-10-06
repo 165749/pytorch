@@ -83,8 +83,11 @@ auto shapesAndDtypes(const std::vector<op_input_t>& inputs) {
               shapes.emplace_back(t.sizes_);
               dtypes.emplace_back(scalarTypeToTypeMeta(t.dtype_).name());
             },
-            [&](const std::vector<TensorMetadata>&) {
-              shapes.emplace_back();
+            [&](const std::vector<TensorMetadata>& v) {
+              // shapes.emplace_back();
+              for (const auto t: v) {
+                shapes.emplace_back(t.sizes_);
+              }
               dtypes.emplace_back("TensorList");
             },
             [&](const c10::IValue&) {
@@ -188,6 +191,15 @@ struct AddGenericMetadata : public MetadataBase {
 
     if (!shapes_and_dtypes.second.empty()) {
       addMetadata("Input type", dtypesToStr(shapes_and_dtypes.second));
+    }
+
+    const auto shapes_and_dtypes_output = shapesAndDtypes(op_event.outputs_);
+    if (!shapes_and_dtypes_output.first.empty()) {
+      addMetadata("Output Dims", shapesToStr(shapes_and_dtypes_output.first));
+    }
+
+    if (!shapes_and_dtypes_output.second.empty()) {
+      addMetadata("Output type", dtypesToStr(shapes_and_dtypes_output.second));
     }
 
     if (config_ && !config_->experimental_config.performance_events.empty()) {
@@ -479,6 +491,9 @@ void onFunctionExit(
   TORCH_INTERNAL_ASSERT(kineto_ctx_ptr != nullptr);
   kineto_ctx_ptr->event_->end_time_ =
       torch::profiler::impl::getApproximateTime();
+
+  state_ptr->record_queue_.getSubqueue()->end_op(fn);
+
   if (!config.experimental_config.performance_events.empty()) {
     state_ptr->record_queue_.getSubqueue()->disable_perf_profiler(
         *kineto_ctx_ptr->event_->counters_);
@@ -513,6 +528,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           onFunctionEnter<use_global_callback>,
           onFunctionExit<use_global_callback>)
           .needsInputs(registration_state_ptr->config().report_input_shapes)
+          .needsOutputs(registration_state_ptr->config().report_input_shapes)
           .scopes(scopes);
 
   auto handle = c10::guts::if_constexpr<use_global_callback>(
@@ -716,6 +732,7 @@ KinetoEvent::KinetoEvent(
 
   result->visit_if_base<ExtraFields<EventType::TorchOp>>([&](const auto& op) {
     std::tie(shapes_, dtypes_) = shapesAndDtypes(op.inputs_);
+    std::tie(output_shapes_, output_dtypes_) = shapesAndDtypes(op.outputs_);
   });
 }
 
@@ -733,12 +750,20 @@ const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::shapes() const {
   return shapes_;
 }
 
+const c10::ArrayRef<std::vector<int64_t>> KinetoEvent::outputShapes() const {
+  return output_shapes_;
+}
+
 bool KinetoEvent::hasTypes() const {
   return !dtypes_.empty();
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::dtypes() const {
   return dtypes_;
+}
+
+const c10::ArrayRef<std::string> KinetoEvent::outputDtypes() const {
+  return output_dtypes_;
 }
 
 const c10::ArrayRef<std::string> KinetoEvent::stack() const {

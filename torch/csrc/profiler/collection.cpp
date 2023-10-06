@@ -93,6 +93,30 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
   tags_.emplace_back(Tag::TERMINATOR);
 }
 
+void InputOutputEncoder::push(const std::vector<c10::IValue> values) {
+  for (const auto& value : values) {
+    if (value.isTensor()) {
+      push(value.toTensor());
+    } else if (value.isScalar()) {
+      tags_.emplace_back(Tag::Scalar);
+      // Scalars are small enough that they are stored in ivalues without an
+      // extra memory alloc
+      // TODO: further optimize this by maybe giving Profiler access to the
+      // guts of IValue.
+      ivalues_.emplace_back(value);
+    } else if (value.isTensorList()) {
+      tags_.emplace_back(Tag::TensorListBegin);
+      for (const auto& t : value.toTensorList()) {
+        push(t);
+      }
+      tags_.emplace_back(Tag::TERMINATOR);
+    } else {
+      tags_.emplace_back(Tag::Other);
+    }
+  }
+  tags_.emplace_back(Tag::TERMINATOR);
+}
+
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined() && !t.is_nested()) { // TODO fix nested sizes
     tags_.emplace_back(Tag::Tensor);
@@ -222,7 +246,7 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
       fn.debugHandle(),
       fn.name());
   if (config_.report_input_shapes) {
-    torch_ops_.inputs_outputs_.push(fn.inputs());
+    torch_ops_.inputs_.push(fn.inputs());
   }
   if (fn.scope() == at::RecordScope::USER_SCOPE) {
     torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
@@ -267,6 +291,13 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
     perf_profiler_->Enable();
   }
   return out;
+}
+
+void ThreadLocalSubqueue::end_op(
+    const at::RecordFunction& fn) {
+  if (config_.report_input_shapes) {
+    torch_ops_.outputs_.push(fn.outputs());
+  }
 }
 
 // ---------------
@@ -329,7 +360,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
-  auto input_getter = inputs_outputs_.getNextShapesAndDtypes();
+  auto input_getter = inputs_.getNextShapesAndDtypes();
+  auto output_getter = outputs_.getNextShapesAndDtypes();
 
   // TODO: CTAD will take care of template args when we move to C++17
   auto jit_stack = StealOrDefault<decltype(jit_stack_)>(jit_stack_);
@@ -343,6 +375,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
         time_converter(event->end_time_),
         input_getter(),
+        output_getter(),
         jit_stack(),
         jit_module(),
         extra_args(),
@@ -355,7 +388,8 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
   }
 
   op_events_.clear();
-  inputs_outputs_.clear();
+  inputs_.clear();
+  outputs_.clear();
 }
 
 template <size_t BlockSize>
@@ -371,14 +405,14 @@ void materialize_vulkan(
         torch::profiler::impl::vulkan::getShaderNameAndDurationNs(i.second);
 
     out.emplace_back(Result::create(
-        /*start_time_ns_=*/time_converter(i.first),
+        /*start_time_ns_=*/time_converter(static_cast<int64_t>(std::get<1>(name_and_duration_ns))),
         /*start_tid_=*/tid,
         /*kineto_info_=*/kineto_info,
         /*extra_fields_=*/
         ExtraFields<EventType::Vulkan>{
             /*name_=*/std::get<0>(name_and_duration_ns),
             /*duration_ns_=*/
-            static_cast<int64_t>(std::get<1>(name_and_duration_ns)),
+            static_cast<int64_t>(std::get<2>(name_and_duration_ns)),
             /*in_tree_building_=*/false}));
   }
 }

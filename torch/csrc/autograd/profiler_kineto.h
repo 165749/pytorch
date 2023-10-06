@@ -32,8 +32,10 @@ struct TORCH_API KinetoEvent {
   uint64_t fwdThreadId() const;
   bool hasShapes() const;
   const c10::ArrayRef<std::vector<int64_t>> shapes() const;
+  const c10::ArrayRef<std::vector<int64_t>> outputShapes() const;
   bool hasTypes() const;
   const c10::ArrayRef<std::string> dtypes() const;
+  const c10::ArrayRef<std::string> outputDtypes() const;
   uint64_t flops() const;
   int64_t sequenceNr() const;
   bool hasStack() const;
@@ -67,6 +69,8 @@ struct TORCH_API KinetoEvent {
   // Copy fields from result so we can return ArrayRefs.
   std::vector<std::vector<int64_t>> shapes_;
   std::vector<std::string> dtypes_;
+  std::vector<std::vector<int64_t>> output_shapes_;
+  std::vector<std::string> output_dtypes_;
 };
 
 // Consolidating events returned directly from Kineto

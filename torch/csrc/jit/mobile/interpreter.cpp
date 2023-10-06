@@ -132,6 +132,7 @@ bool InterpreterState::run(Stack& stack) {
           RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(
               code.op_names_[inst.X].name, debug_handle, stack);
           code.operators_[inst.X](stack);
+          RECORD_OUTPUTS(stack);
           frame.step();
         } break;
         case OPN: {

@@ -105,7 +105,7 @@ class QueryPool final {
    * ShaderDuration's idx field, which is what number entry it is since the last
    * reset before it was added to the shader logs.
    */
-  std::tuple<std::string, uint64_t> get_shader_name_and_execution_duration_ns(
+  std::tuple<std::string, uint64_t, uint64_t> get_shader_name_and_execution_duration_ns(
       size_t query_index);
   /** Total number of entries in all shader logs */
   size_t shader_logs_entry_count();

@@ -301,6 +301,18 @@ struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
   Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
     return vulkan::ops::copy_(self, src);
   }
+
+  void enable_op_profiling() const override {
+    at::native::vulkan::api::context()->enable_op_profiling();
+  }
+
+  void disable_op_profiling() const override {
+    at::native::vulkan::api::context()->disable_op_profiling();
+  }
+
+  void reset_querypool() const override {
+    at::native::vulkan::api::context()->reset_querypool();
+  }
 };
 static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 

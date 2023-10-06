@@ -17,7 +17,8 @@ namespace {
 // On Mali gpus timestamp_period seems to return 0.
 // For some reason when 52.08 is used op runtimes seem to make more sense
 // TODO: Figure out what is special about 52.08
-constexpr int64_t default_ns_per_tick = 52; // lround(52.08f);
+// (Zhuojin): Improve precision for conversion
+constexpr int64_t default_ns_per_tick = 52080; // lround(52.08f);
 } // namespace
 
 QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
@@ -43,7 +44,7 @@ QueryPool::QueryPool(const QueryPoolConfig& config, const Adapter* adapter_p)
   shader_log().reserve(config_.initialReserveSize);
 
   TORCH_CHECK(adapter_p, "Valid GPU device must be created for QueryPool");
-  ns_per_tick_ = std::lround(adapter_p->timestamp_period());
+  ns_per_tick_ = std::lround(adapter_p->timestamp_period() * 1e3);
   ns_per_tick_ = (ns_per_tick_ == 0) ? default_ns_per_tick : ns_per_tick_;
 
 #ifdef USE_KINETO
@@ -160,8 +161,8 @@ void QueryPool::extract_results() {
       flags)); // flags
 
   for (ShaderDuration& entry : shader_log()) {
-    entry.start_time_ns = query_data.at(entry.start_query_idx) * ns_per_tick_;
-    entry.end_time_ns = query_data.at(entry.end_query_idx) * ns_per_tick_;
+    entry.start_time_ns = query_data.at(entry.start_query_idx) * ns_per_tick_ / 1e3;
+    entry.end_time_ns = query_data.at(entry.end_query_idx) * ns_per_tick_ / 1e3;
     entry.execution_duration_ns = entry.end_time_ns - entry.start_time_ns;
   }
 
@@ -237,7 +238,7 @@ void QueryPool::shader_log_for_each(
   std::for_each(shader_log().begin(), shader_log().end(), fn);
 }
 
-std::tuple<std::string, uint64_t> QueryPool::
+std::tuple<std::string, uint64_t, uint64_t> QueryPool::
     get_shader_name_and_execution_duration_ns(size_t query_index) {
   extract_results();
 
@@ -262,8 +263,8 @@ std::tuple<std::string, uint64_t> QueryPool::
   const ShaderDuration& entry =
       shader_logs_[log_idx][query_index - entry_count_acc];
 
-  return std::tuple<std::string, uint64_t>(
-      entry.kernel_name, entry.execution_duration_ns);
+  return std::tuple<std::string, uint64_t, uint64_t>(
+      entry.kernel_name, entry.start_time_ns, entry.execution_duration_ns);
 }
 
 size_t QueryPool::shader_logs_entry_count_thread_unsafe() {

@@ -61,7 +61,9 @@ build_android() {
       BUILD_ROOT="$ANDROID_BUILD_ROOT" \
       "$PYTORCH_DIR/scripts/build_android.sh" \
       -DANDROID_CCACHE="$(which ccache)" \
-      -DUSE_LITE_INTERPRETER_PROFILER="OFF"
+
+      # (Zhuojin): Enable mobile profiling
+      # -DUSE_LITE_INTERPRETER_PROFILER="OFF"
 
     echo "$abi build output lib,include at $ANDROID_BUILD_ROOT/install"
     ln -s "$ANDROID_BUILD_ROOT/install/lib" "$LIB_DIR/$abi"

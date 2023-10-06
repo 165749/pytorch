@@ -13,13 +13,13 @@ namespace vulkan {
 // doesn't work because we need to capture the QueryPool in the lambda context
 // https://stackoverflow.com/a/28746827
 using GetShaderNameAndDurationNsFn =
-    std::function<std::tuple<std::string, uint64_t>(int64_t)>;
+    std::function<std::tuple<std::string, uint64_t, uint64_t>(int64_t)>;
 TORCH_API void registerGetShaderNameAndDurationNs(
     GetShaderNameAndDurationNsFn get_shader_name_and_duration_ns);
 
 TORCH_API void deregisterGetShaderNameAndDurationNs();
 
-std::tuple<std::string, uint64_t> getShaderNameAndDurationNs(
+std::tuple<std::string, uint64_t, uint64_t> getShaderNameAndDurationNs(
     const vulkan_id_t& vulkan_id);
 
 } // namespace vulkan

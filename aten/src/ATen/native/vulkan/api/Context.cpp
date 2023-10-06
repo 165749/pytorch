@@ -1,6 +1,9 @@
 #include <ATen/native/vulkan/api/Context.h>
 
 #include <sstream>
+#include <android/log.h>
+#include <chrono>
+#include <torch/csrc/jit/mobile/profiler_edge.h>
 
 namespace at {
 namespace native {
@@ -73,6 +76,7 @@ void Context::submit_compute_epilogue(
 void Context::submit_cmd_to_gpu(
     const VkFence fence_handle,
     const bool final_use) {
+  auto begin = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   if (cmd_) {
     cmd_.end();
     adapter_p_->submit_cmd(
@@ -80,18 +84,30 @@ void Context::submit_cmd_to_gpu(
 
     submit_count_ = 0u;
   }
+  auto end = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  torch::jit::mobile::getCurrentEdgeProfiler()->recordBackendEvent(
+      begin, end, 0, "submit_cmd", "");
 }
 
 void Context::flush() {
+  auto begin = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   VK_CHECK(vkQueueWaitIdle(queue()));
 
   command_pool_.flush();
   descriptor_pool_.flush();
 
+  auto command_cleaned = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
   std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
   buffers_to_clear_.clear();
   images_to_clear_.clear();
+  auto end = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  torch::jit::mobile::getCurrentEdgeProfiler()->recordBackendEvent(
+      begin + 1, command_cleaned, 0, "command_pool clean", "");
+  torch::jit::mobile::getCurrentEdgeProfiler()->recordBackendEvent(
+    command_cleaned, end, 0, "storage clean", "");
+  torch::jit::mobile::getCurrentEdgeProfiler()->recordBackendEvent(
+      begin, end, 0, "flush", "");
 }
 
 bool available() {
@@ -102,6 +118,8 @@ Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
       const uint32_t submit_frequency = 16u;
+      // (Zhuojin): Update frequency for cmd submission
+      // const uint32_t submit_frequency = 1u;
 
       const CommandPoolConfig cmd_config{
           32u, // cmdPoolInitialSize
@@ -118,7 +136,9 @@ Context* context() {
       };
 
       const QueryPoolConfig query_pool_config{
-          4096u, // maxQueryCount
+          // 4096u, // maxQueryCount
+          // (Zhuojin): Increase query count (TODO: verify overhead)
+          1u<<20, // maxQueryCount
           256u, // initialReserveSize
       };
 
